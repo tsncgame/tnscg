@@ -1,0 +1,9 @@
+{
+  "name": "tsncg-web",
+  "version": "1.02.0-beta",
+  "description": "Twój Stary Najebany Clicker Game - wersja przeglądarkowa",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

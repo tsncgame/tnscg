@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TSNCG - Gra</title>
+  <link rel="stylesheet" href="game.css">
+</head>
+<body><div id="authGate" class="auth-gate hidden"><div><h2>TSNCG WYMAGA KONTA</h2><p>Zaloguj się, żeby grać w wersji przeglądarkowej i korzystać z topki.</p><a class="story-button" href="index.html#konto">LOGOWANIE / REJESTRACJA</a></div></div>
+  <div id="saveStatus" class="save-status"></div>
+  <div id="backupModal" class="story-modal hidden" role="dialog" aria-modal="true" aria-labelledby="backupTitle">
+    <div class="story-window backup-window">
+      <div class="story-top"><span>BACKUP ZAPISU</span><button id="backupClose" aria-label="Zamknij">×</button></div>
+      <h2 id="backupTitle">Kopia bezpieczeństwa</h2>
+      <p class="backup-note">Eksport zapisuje postęp do pliku JSON. Import zastępuje bieżący postęp danymi z wybranego pliku.</p>
+      <div class="backup-actions">
+        <button id="exportSaveButton" class="story-button">📤 EKSPORTUJ ZAPIS</button>
+        <button id="importSaveButton" class="story-button">📥 IMPORTUJ ZAPIS</button>
+      </div>
+      <div id="backupStatus" class="backup-status"></div>
+    </div>
+  </div>
+  <div id="settingsModal" class="story-modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="story-window settings-window">
+      <div class="story-top"><span>USTAWIENIA</span><button id="settingsClose" aria-label="Zamknij">×</button></div>
+      <h2 id="settingsTitle">Panel ustawień</h2>
+      <div class="settings-grid">
+        <label class="setting-row"><span>GŁOŚNOŚĆ MUZYKI</span><input id="settingsMusicVolume" type="range" min="0" max="1" step="0.01" value="0.55"><b id="settingsMusicValue">55%</b></label>
+        <label class="setting-row"><span>GŁOŚNOŚĆ DŹWIĘKÓW</span><input id="settingsSfxVolume" type="range" min="0" max="1" step="0.01" value="0.55"><b id="settingsSfxValue">55%</b></label>
+        <label class="setting-row"><span>EFEKTY WIZUALNE</span><button id="effectsToggle" class="setting-toggle" type="button">WŁĄCZONE</button></label>
+        <label class="setting-row"><span>AUTOMATYCZNY ZAPIS</span><button id="autosaveToggle" class="setting-toggle" type="button">WŁĄCZONY</button></label>
+        <label class="setting-row"><span>TRYB PEŁNOEKRANOWY</span><button id="fullscreenToggle" class="setting-toggle" type="button">PRZEŁĄCZ</button></label>
+      </div>
+      <p class="settings-note">Ustawienia zapisują się razem z postępem. Bo nawet kufel zasługuje na konfigurację.</p>
+    </div>
+  </div>
+  <div id="statsModal" class="story-modal hidden" role="dialog" aria-modal="true" aria-labelledby="statsTitle">
+    <div class="story-window stats-window">
+      <div class="story-top"><span>STATYSTYKI</span><button id="statsClose" aria-label="Zamknij">×</button></div>
+      <h2 id="statsTitle">Raport karczemny</h2>
+      <div id="statsGrid" class="stats-grid"></div>
+    </div>
+  </div>
+  <div id="musicModal" class="story-modal hidden" role="dialog" aria-modal="true" aria-labelledby="musicTitle">
+    <div class="story-window music-window">
+      <div class="story-top"><span>MUZYKA</span><button id="musicClose" aria-label="Zamknij">×</button></div>
+      <h2 id="musicTitle">Twoja muzyka</h2>
+      <p class="music-help">Wrzuć MP3, OGG, WAV lub FLAC do folderu <b>music</b>, potem kliknij SKANUJ.</p>
+      <div class="music-controls">
+        <button id="musicPrev">⏮</button><button id="musicToggle">▶ ODTWARZAJ</button><button id="musicNext">⏭</button>
+        <label>GŁOŚNOŚĆ <input id="musicVolume" type="range" min="0" max="1" step="0.01" value="0.55"></label>
+        <button id="musicScan">↻ SKANUJ</button>
+      </div>
+      <div id="musicList" class="music-list"></div>
+      <div id="musicNow" class="music-now">Brak utworów. Karczma milczy.</div>
+    </div>
+  </div>
+
+  <div id="questsModal" class="story-modal hidden" role="dialog" aria-modal="true" aria-labelledby="questsTitle">
+    <div class="story-window quests-window">
+      <div class="story-top"><span>ZADANIA KARCZEMNE</span><button id="questsClose" aria-label="Zamknij">×</button></div>
+      <h2 id="questsTitle">Misje i nagrody</h2>
+      <p class="quests-note">Wykonuj zadania, odbieraj nagrody i udawajmy, że to produktywność.</p>
+      <div id="questsList" class="quests-list"></div>
+    </div>
+  </div>
+
+  <div id="collectionModal" class="story-modal hidden" role="dialog" aria-modal="true" aria-labelledby="collectionTitle">
+    <div class="story-window collection-window">
+      <div class="story-top"><span>KOLEKCJA TRUNKÓW</span><button id="collectionClose" aria-label="Zamknij">×</button></div>
+      <h2 id="collectionTitle">Kuflowe archiwum</h2>
+      <p class="collection-note">Każdy odblokowany trunek trafia do kolekcji. Możesz patrzeć na progres i udawać, że to muzeum.</p>
+      <div id="collectionList" class="collection-list"></div>
+      <div id="collectionProgress" class="collection-progress">0/7 odblokowanych</div>
+    </div>
+  </div>
+  <div id="achievementsModal" class="story-modal hidden" role="dialog" aria-modal="true" aria-labelledby="achievementsTitle"><div class="story-window achievements-window"><div class="story-top"><span>OSIĄGNIĘCIA</span><button id="achievementsClose" aria-label="Zamknij">×</button></div><h2 id="achievementsTitle">50 osiągnięć</h2><div id="achievementsList" class="achievements-list"></div></div></div>
+  <div id="commandsModal" class="story-modal hidden" role="dialog" aria-modal="true" aria-labelledby="commandsTitle">
+    <div class="story-window commands-window">
+      <div class="story-top"><span>PANEL KOMEND</span><button id="commandsClose" aria-label="Zamknij">×</button></div>
+      <h2 id="commandsTitle">Komendy karczmy</h2>
+      <p class="commands-note">Wpisz kod odblokowujący ukryty motyw. Podpowiedź: <b>~ Ulubione hasło satanistów</b></p>
+      <label class="command-input"><span>KOD</span><input id="commandCodeInput" maxlength="32" autocomplete="off" spellcheck="false" placeholder="Wpisz kod..." /></label>
+      <button id="commandExecute" class="story-button">WYKONAJ</button>
+      <div id="commandStatus" class="command-status"></div>
+    </div>
+  </div>
+  <div id="storyModal" class="story-modal hidden" role="dialog" aria-modal="true" aria-labelledby="storyTitle">
+    <div class="story-window">
+      <div class="story-top"><span id="storyChapter">ROZDZIAŁ I</span><button id="storyClose" aria-label="Zamknij">×</button></div>
+      <h2 id="storyTitle">Pod Zdechłym Kogutem</h2>
+      <div id="storyText" class="story-text"></div>
+      <div class="story-actions"><button id="storyNext">DALEJ ▶</button></div>
+    </div>
+  </div>
+  <div class="scanlines"></div>
+  <header class="topbar">
+    <div class="brand"><img class="brand-logo" src="assets/logo.png" alt="Logo TSNCG"><span>🍺</span> TSNCG</div>
+    <div class="stats">
+      <div class="stat"><small>KASA</small><strong id="coins">0</strong></div>
+      <div class="stat"><small>KLIKNIĘCIA</small><strong id="clicks">0</strong></div>
+      <div class="stat"><small>/ SEK.</small><strong id="perSecond">0</strong></div>
+      <div class="stat"><small>PIWO</small><strong id="topDrinkName">Piwo Jasne</strong></div>
+      <div class="stat combo-stat"><small>COMBO</small><strong id="combo">0</strong></div>
+    </div>
+  </header>
+
+  <main class="game-layout">
+    <aside class="panel left-panel">
+      <h2>TWÓJ STARY</h2>
+      <div class="portrait">🍺</div>
+      <p class="subtitle" id="characterNameDisplay">Twój Stary</p>
+      <label class="character-name"><span>NAZWA POSTACI</span><input id="characterNameInput" maxlength="24" value="Twój Stary" autocomplete="off"></label>
+      <div class="xp"><div id="xpBar"></div></div>
+      <div class="level">POZIOM <b id="level">1</b></div>
+      <div class="story-box" id="storyBox">„Jeszcze jeden kufel. Tym razem naprawdę ostatni.”</div>
+      <button id="storyButton" class="story-button">📜 FABUŁA</button><button id="achievementsButton" class="story-button">🏆 OSIĄGNIĘCIA <span id="achievementsCount">0/50</span></button><button id="questsButton" class="story-button">📋 ZADANIA <span id="questsCount">0/6</span></button><button id="collectionButton" class="story-button">🍺 KOLEKCJA <span id="collectionCount">0/7</span></button><button id="musicButton" class="story-button">🎵 MUZYKA</button><button id="statsButton" class="story-button">📊 STATYSTYKI</button><button id="settingsButton" class="story-button">⚙ USTAWIENIA</button><button id="backupButton" class="story-button">💾 BACKUP</button><button id="commandsButton" class="story-button">⌘ PANEL KOMEND</button><button id="stage22Button" class="story-button">✨ NOWA GRA+</button><button id="stage21Button" class="story-button">✨ RANGI I TYTUŁY</button><button id="stage20Button" class="story-button">✨ MIGAWKI ZAPISU</button><button id="stage19Button" class="story-button">✨ STEROWANIE</button><button id="stage18Button" class="story-button">✨ MOTYWY KARCZMY</button><button id="stage17Button" class="story-button">✨ STATYSTYKI+</button><button id="stage16Button" class="story-button">✨ DRZEWKO UMIEJĘTNOŚCI</button><button id="stage15Button" class="story-button">✨ ZLECENIA DZIENNE</button><button id="stage14Button" class="story-button">✨ PRESTIŻ</button>
+    </aside>
+
+    <section class="center">
+      <div class="chapter">ROZDZIAŁ I • POD ZDECHŁYM KOGUTEM</div>
+      <h1>KLIKNIJ PIWO</h1>
+      <p class="hint">Każde kliknięcie nabija kasę. Ludzkość po raz kolejny osiąga szczyt technologii.</p>
+
+      <button id="beerButton" class="beer-button" aria-label="Kliknij piwo">
+        <span class="foam">▰▰▰▰</span>
+        <span class="beer-mug"><i></i></span>
+        <span class="handle"></span>
+      </button>
+      <div id="floaters" class="floaters"></div>
+
+      <div class="combo-tip">Klikaj szybko, żeby nabić COMBO. 10+ = dodatkowy bajer.</div>
+
+      <div class="drink-card"><div><small>AKTUALNY TRUNEK</small><b id="drinkName">Piwo Jasne</b><span id="drinkUnlock">STARTOWE PIWO</span></div><strong id="drinkMult">×1</strong></div>
+      <div class="click-power">+<span id="clickPower">1</span> KASY / KLIK</div>
+      <div class="next-drink" id="nextDrink">Następne: Lager • 250 kasy</div>
+    </section>
+
+    <aside class="panel right-panel">
+      <h2>ULEPSZENIA</h2>
+      <div class="buy-multiplier"><span>KUPUJ PO:</span><div class="buy-multiplier-buttons"><button type="button" class="buy-mult active" data-mult="1">1</button><button type="button" class="buy-mult" data-mult="5">5</button><button type="button" class="buy-mult" data-mult="10">10</button><button type="button" class="buy-mult" data-mult="100">100</button></div></div>
+      <button class="upgrade" id="upgradeClick">
+        <span class="upgrade-icon">👊</span>
+        <span><b>MOCNY KLIK</b><small>+1 kasa za klik</small></span>
+        <strong><span id="clickLevel">LVL 0</span><br><span id="clickCost">25</span></strong>
+      </button>
+      <button class="upgrade" id="upgradePassive">
+        <span class="upgrade-icon">🛢️</span>
+        <span><b>STARY W PIWNICY</b><small>+1 kasa / sek.</small></span>
+        <strong><span id="passiveLevel">LVL 0</span><br><span id="passiveCost">75</span></strong>
+      </button>
+      <button class="upgrade" id="upgradeCrit"><span class="upgrade-icon">💥</span><span><b>KRWISTY KRYTYK</b><small>+1% szansy na krytyka (max 10)</small></span><strong><span id="critLevel">LVL 0</span><br><span id="critCost">250</span></strong></button>
+      <button class="upgrade" id="upgradeBrutal"><span class="upgrade-icon">👊</span><span><b>WŚCIEKŁY KLIK</b><small>+3 kasy za klik</small></span><strong><span id="brutalLevel">LVL 0</span><br><span id="brutalCost">1000</span></strong></button>
+      <button class="upgrade" id="upgradeTurbo"><span class="upgrade-icon">🛢️</span><span><b>TURBO PIWNICA</b><small>+3 kasy / sek.</small></span><strong><span id="turboLevel">LVL 0</span><br><span id="turboCost">3000</span></strong></button>
+      <button class="upgrade" id="upgradeGolden"><span class="upgrade-icon">🍺</span><span><b>ZŁOTY KUFEL</b><small>+5% wszystkich zarobków</small></span><strong><span id="goldenLevel">LVL 0</span><br><span id="goldenCost">10000</span></strong></button>
+      <button class="upgrade" id="upgradeLucky"><span class="upgrade-icon">🍀</span><span><b>SZCZĘŚLIWY PALEC</b><small>+0,5% szansy na krytyka</small></span><strong><span id="luckyLevel">LVL 0</span><br><span id="luckyCost">15000</span></strong></button>
+      <button class="upgrade" id="upgradeCombo"><span class="upgrade-icon">🔥</span><span><b>COMBO TURBO</b><small>+2% premii combo</small></span><strong><span id="comboUpgradeLevel">LVL 0</span><br><span id="comboUpgradeCost">25000</span></strong></button>
+      <button class="upgrade" id="upgradeBrewery"><span class="upgrade-icon">🏭</span><span><b>MAGIA BROWARU</b><small>+3% mnożnika trunku</small></span><strong><span id="breweryLevel">LVL 0</span><br><span id="breweryCost">50000</span></strong></button>
+      <div class="coming">ULEPSZENIA SKALUJĄ SIĘ CENĄ.<br>BO TANIE RZECZY SĄ PODEJRZANE.</div>
+    </aside>
+  </main>
+
+  <div id="leaderboardModal" class="story-modal hidden" role="dialog" aria-modal="true" aria-labelledby="leaderboardTitle">
+  <div class="story-window stats-window leaderboard-window">
+    <div class="story-top"><span>TOPKA GRACZY</span><button id="leaderboardClose" aria-label="Zamknij">×</button></div>
+    <h2 id="leaderboardTitle">Karczemna topka</h2>
+    <p class="backup-note">Wynik jest wysyłany do serwera. W wersji Beta nie ma jeszcze logowania, więc internetowe gobliny mogą próbować oszukiwać.</p>
+    <div class="leaderboard-actions">
+      <button id="leaderboardRefresh" class="story-button">ODŚWIEŻ TOPKĘ</button>
+      <button id="leaderboardSubmit" class="story-button">ZGŁOŚ MÓJ WYNIK</button>
+    </div>
+    <div id="leaderboardStatus" class="backup-status"></div>
+    <div id="leaderboardList" class="stats-grid"></div>
+  </div>
+</div>
+<footer class="footer">
+    <span>TSNCG • 1.01 Beta</span>
+    <span>ESC • MENU • F11 • M • S</span>
+  </footer>
+
+<div class="account-bar"><span id="webUser">KONTO: sprawdzanie...</span><button id="webLogout" type="button">WYLOGUJ</button></div>
+<div class="save-controls">
+    <button id="saveButton" type="button">💾 ZAPISZ</button>
+    <button id="leaderboardButton" type="button">🏆 TOPKA</button>
+    <button id="resetButton" type="button">↻ RESET ZAPISU</button>
+  </div>
+
+<div id="stage14Modal" class="story-modal hidden" role="dialog" aria-modal="true"><div class="story-window stage-window"><div class="story-top"><span>FUNKCJA</span><button id="stage14Close">×</button></div><h2>PRESTIŻ</h2><div id="stage14Content" class="stage-content"></div></div></div>
+
+<div id="stage15Modal" class="story-modal hidden" role="dialog" aria-modal="true"><div class="story-window stage-window"><div class="story-top"><span>FUNKCJA</span><button id="stage15Close">×</button></div><h2>ZLECENIA DZIENNE</h2><div id="stage15Content" class="stage-content"></div></div></div>
+
+<div id="stage16Modal" class="story-modal hidden" role="dialog" aria-modal="true"><div class="story-window stage-window"><div class="story-top"><span>FUNKCJA</span><button id="stage16Close">×</button></div><h2>DRZEWKO UMIEJĘTNOŚCI</h2><div id="stage16Content" class="stage-content"></div></div></div>
+
+<div id="stage17Modal" class="story-modal hidden" role="dialog" aria-modal="true"><div class="story-window stage-window"><div class="story-top"><span>FUNKCJA</span><button id="stage17Close">×</button></div><h2>STATYSTYKI+</h2><div id="stage17Content" class="stage-content"></div></div></div>
+
+<div id="stage18Modal" class="story-modal hidden" role="dialog" aria-modal="true"><div class="story-window stage-window"><div class="story-top"><span>FUNKCJA</span><button id="stage18Close">×</button></div><h2>MOTYWY KARCZMY</h2><div id="stage18Content" class="stage-content"></div></div></div>
+
+<div id="stage19Modal" class="story-modal hidden" role="dialog" aria-modal="true"><div class="story-window stage-window"><div class="story-top"><span>FUNKCJA</span><button id="stage19Close">×</button></div><h2>STEROWANIE</h2><div id="stage19Content" class="stage-content"></div></div></div>
+
+<div id="stage20Modal" class="story-modal hidden" role="dialog" aria-modal="true"><div class="story-window stage-window"><div class="story-top"><span>FUNKCJA</span><button id="stage20Close">×</button></div><h2>MIGAWKI ZAPISU</h2><div id="stage20Content" class="stage-content"></div></div></div>
+
+<div id="stage21Modal" class="story-modal hidden" role="dialog" aria-modal="true"><div class="story-window stage-window"><div class="story-top"><span>FUNKCJA</span><button id="stage21Close">×</button></div><h2>RANGI I TYTUŁY</h2><div id="stage21Content" class="stage-content"></div></div></div>
+
+<div id="stage22Modal" class="story-modal hidden" role="dialog" aria-modal="true"><div class="story-window stage-window"><div class="story-top"><span>FUNKCJA</span><button id="stage22Close">×</button></div><h2>NOWA GRA+</h2><div id="stage22Content" class="stage-content"></div></div></div>
+  <script src="web-adapter.js"></script>
+  <script src="web-auth.js"></script>
+  <script src="web-leaderboard.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

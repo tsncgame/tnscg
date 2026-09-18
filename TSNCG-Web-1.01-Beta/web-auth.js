@@ -6,7 +6,7 @@
 
   async function check(){
     try {
-      const r = await fetch(${API_URL}/api/me, {
+      const r = await fetch(`${API_URL}/api/me`, {
         cache: 'no-store',
         credentials: 'include'
       });
@@ -24,6 +24,7 @@
       }
 
       return true;
+
     } catch (_) {
       gate?.classList.remove('hidden');
       document.body.classList.add('auth-required');
@@ -32,10 +33,12 @@
   }
 
   document.getElementById('webLogout')?.addEventListener('click', async () => {
-    await fetch(${API_URL}/api/logout, {
-      method: 'POST',
-      credentials: 'include'
-    });
+    try {
+      await fetch(`${API_URL}/api/logout`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+    } catch (_) {}
 
     location.href = 'index.html#konto';
   });

@@ -12,15 +12,15 @@
   const loginTab = $('loginTab');
   const registerTab = $('registerTab');
 
-  function msg(t, ok = false) {
-    if (status) {
-      status.textContent = t;
-      status.className = 'auth-status ' + (ok ? 'ok' : '');
-    }
+  function msg(text, ok = false) {
+    if (!status) return;
+
+    status.textContent = text;
+    status.className = 'auth-status ' + (ok ? 'ok' : '');
   }
 
   async function post(path, data) {
-    const r = await fetch(${API_URL}${path}, {
+    const response = await fetch(${API_URL}${path}, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -29,30 +29,43 @@
       body: JSON.stringify(data)
     });
 
-    const text = await r.text();
+    const text = await response.text();
 
-    let d = {};
+    let dataResponse = {};
 
     try {
-      d = text ? JSON.parse(text) : {};
+      dataResponse = text
+        ? JSON.parse(text)
+        : {};
     } catch (_) {
-      throw new Error(Serwer zwrócił nieprawidłową odpowiedź (${r.status}));
+      throw new Error(
+        Serwer zwrócił nieprawidłową odpowiedź (${response.status})
+      );
     }
 
-    if (!r.ok) {
-      throw new Error(d.error || Błąd serwera (${r.status}));
+    if (!response.ok) {
+      throw new Error(
+        dataResponse.error ||
+        Błąd serwera (${response.status})
+      );
     }
 
-    return d;
+    return dataResponse;
   }
 
-  loginForm?.addEventListener('submit', async e => {
-    e.preventDefault();
+  /* =========================
+     LOGOWANIE
+  ========================= */
+
+  loginForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+
+    msg('LOGOWANIE...');
 
     try {
       await post('/api/login', {
-        username: $('loginUsername').value,
-        password: $('loginPassword').value
+        username: $('loginUsername')?.value || '',
+        password: $('loginPassword')?.value || ''
       });
 
       msg('ZALOGOWANO ✓', true);
@@ -61,18 +74,24 @@
         location.href = 'game.html';
       }, 250);
 
-    } catch (err) {
-      msg(err.message);
+    } catch (error) {
+      msg(error.message);
     }
   });
 
-  registerForm?.addEventListener('submit', async e => {
-    e.preventDefault();
+  /* =========================
+     REJESTRACJA
+  ========================= */
+
+  registerForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+
+    msg('TWORZENIE KONTA...');
 
     try {
       await post('/api/register', {
-        username: $('registerUsername').value,
-        password: $('registerPassword').value
+        username: $('registerUsername')?.value || '',
+        password: $('registerPassword')?.value || ''
       });
 
       msg('KONTO UTWORZONE ✓', true);
@@ -81,10 +100,14 @@
         location.href = 'game.html';
       }, 250);
 
-    } catch (err) {
-      msg(err.message);
+    } catch (error) {
+      msg(error.message);
     }
   });
+
+  /* =========================
+     ZAKŁADKA LOGOWANIA
+  ========================= */
 
   loginTab?.addEventListener('click', () => {
     loginForm?.classList.remove('hidden');
@@ -94,6 +117,10 @@
     registerTab?.classList.remove('active');
   });
 
+  /* =========================
+     ZAKŁADKA REJESTRACJI
+  ========================= */
+
   registerTab?.addEventListener('click', () => {
     registerForm?.classList.remove('hidden');
     loginForm?.classList.add('hidden');
@@ -102,28 +129,44 @@
     loginTab?.classList.remove('active');
   });
 
+  /* =========================
+     SPRAWDZANIE SESJI
+  ========================= */
+
   async function refresh() {
     try {
-      const r = await fetch(${API_URL}/api/me, {
+      const response = await fetch(${API_URL}/api/me, {
         cache: 'no-store',
         credentials: 'include'
       });
 
-      if (r.ok) {
-        const d = await r.json();
-
-        if (user) {
-          user.textContent = 'ZALOGOWANY: ' + d.user.username;
-        }
+      if (!response.ok) {
+        return;
       }
-    } catch (_) {}
+
+      const data = await response.json();
+
+      if (user && data.user?.username) {
+        user.textContent =
+          'ZALOGOWANY: ' + data.user.username;
+      }
+
+    } catch (_) {
+      // Brak połączenia z API.
+    }
   }
 
+  /* =========================
+     WYLOGOWANIE
+  ========================= */
+
   $('logoutButton')?.addEventListener('click', async () => {
-    await fetch(${API_URL}/api/logout, {
-      method: 'POST',
-      credentials: 'include'
-    });
+    try {
+      await fetch(${API_URL}/api/logout, {
+        method: 'POST',
+        credentials: 'include'
+      });
+    } catch (_) {}
 
     location.reload();
   });

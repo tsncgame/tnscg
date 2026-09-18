@@ -12,7 +12,23 @@ let lastSaveTime = Date.now();
 let saveStatusTimer = null;
 let webVerifiedClicksPending = 0;
 let webVerifyBusy = false;
-async function syncWebClicks(force=false){ if(!window.tsncgWebAuthReady || !location.protocol.startsWith('http')) return; if(webVerifyBusy || (!force && webVerifiedClicksPending < 5)) return; const delta=webVerifiedClicksPending; webVerifiedClicksPending=0; webVerifyBusy=true; try{ const r=await fetch('/api/verify-clicks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delta})}); if(!r.ok) webVerifiedClicksPending+=delta; }catch(_){ webVerifiedClicksPending+=delta; } finally{webVerifyBusy=false;} }
+async function syncWebClicks(force=false){ if(!window.tsncgWebAuthReady || !location.protocol.startsWith('http')) return; if(webVerifyBusy || (!force && webVerifiedClicksPending < 5)) return; const delta=webVerifiedClicksPending; webVerifiedClicksPending=0; webVerifyBusy=true; try {
+    const r = await fetch(${API_URL}/api/verify-clicks, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ delta })
+    });
+
+    if (!r.ok) {
+        webVerifiedClicksPending += delta;
+    }
+} catch (_) {
+    webVerifiedClicksPending += delta;
+} finally {
+    webVerifyBusy = false;
+}
 setInterval(()=>syncWebClicks(false),1000);
 window.addEventListener('beforeunload',()=>{ if(webVerifiedClicksPending>0) navigator.sendBeacon?.('/api/verify-clicks',new Blob([JSON.stringify({delta:webVerifiedClicksPending})],{type:'application/json'})); });
 

@@ -1,33 +1,194 @@
-const API_URL = 'https://tsncg.onrender.com';
 <!doctype html>
 <html lang="pl">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TSNCG | Twój Stary Najebany Clicker Game</title>
 <link rel="stylesheet" href="site.css">
 </head>
+
 <body>
+
 <header class="hero">
-  <nav><div class="brand">TSNCG</div><a href="#gra">GRA</a><a href="#konto">KONTO</a><a href="#topka">TOPKA</a><a href="#info">O GRZE</a></nav>
-  <div class="hero-content"><img src="assets/logo.png" alt="Logo TSNCG"><div><p class="eyebrow">WERSJA PRZEGLĄDARKOWA • 1.01 BETA</p><h1>Twój Stary Najebany Clicker Game</h1><p>Klikaj kufel, rozwijaj karczmę, odblokowuj trunki i próbuj nie przegrać z własnym combo.</p><a class="cta" href="game.html">ODPAL GRĘ</a></div></div>
+  <nav>
+    <div class="brand">TSNCG</div>
+    <a href="#gra">GRA</a>
+    <a href="#konto">KONTO</a>
+    <a href="#topka">TOPKA</a>
+    <a href="#info">O GRZE</a>
+  </nav>
+
+  <div class="hero-content">
+    <img src="assets/logo.png" alt="Logo TSNCG">
+
+    <div>
+      <p class="eyebrow">WERSJA PRZEGLĄDARKOWA • 1.01 BETA</p>
+      <h1>Twój Stary Najebany Clicker Game</h1>
+      <p>Klikaj kufel, rozwijaj karczmę, odblokowuj trunki i próbuj nie przegrać z własnym combo.</p>
+      <a class="cta" href="game.html">ODPAL GRĘ</a>
+    </div>
+  </div>
 </header>
+
 <main>
-<section id="konto" class="auth-section"><div><p class="eyebrow">KONTO GRACZA</p><h2>Wejdź do karczmy</h2><p>Topka i antycheat potrzebują konta. Hasła nie są przechowywane w bazie jako zwykły tekst, bo nawet karczmarz ma jakieś standardy.</p></div><div class="auth-box"><div class="auth-tabs"><button id="loginTab" class="active">LOGOWANIE</button><button id="registerTab">REJESTRACJA</button></div><form id="loginForm"><input id="loginUsername" autocomplete="username" maxlength="24" placeholder="Nick" required><input id="loginPassword" type="password" autocomplete="current-password" placeholder="Hasło" required><button class="cta" type="submit">ZALOGUJ</button></form><form id="registerForm" class="hidden"><input id="registerUsername" autocomplete="username" maxlength="24" placeholder="Nick (3-24 znaki)" required><input id="registerPassword" type="password" autocomplete="new-password" minlength="8" placeholder="Hasło (min. 8 znaków)" required><button class="cta" type="submit">UTWÓRZ KONTO</button></form><div id="authStatus" class="auth-status"></div><div id="authUser" class="auth-user"></div></div></section>
-<section id="gra" class="cards"><article><b>🍺 7 TRUNKÓW</b><span>Od Jasnego Piwa po Złoty Eliksir.</span></article><article><b>🏆 TOPKA</b><span>Porównuj wynik z innymi graczami.</span></article><article><b>📋 ZADANIA DZIENNE</b><span>Codzienny progres liczony od zera.</span></article><article><b>💾 ZAPIS W PRZEGLĄDARCE</b><span>Postęp siedzi w localStorage. Internet nie musi go pamiętać.</span></article></section>
-<section id="topka" class="section"><div><p class="eyebrow">RANKING</p><h2>Karczemna topka</h2><p>Najlepsi klikacze są tutaj. Przynajmniej dopóki ktoś nie odkryje kolejnego sposobu na oszukanie formularza.</p></div><div id="topList" class="top-list">Ładowanie...</div></section>
-<section id="info" class="section dark"><p class="eyebrow">O GRZE</p><h2>Mały kufel. Duży problem.</h2><p>TSNCG to clicker z fabułą, ulepszeniami, osiągnięciami, prestiżem, Nową Grą+, zadaniami i karczemnym chaosem. Wersja przeglądarkowa działa bez instalowania Electrona.</p></section>
+
+<section id="konto" class="auth-section">
+  <div>
+    <p class="eyebrow">KONTO GRACZA</p>
+    <h2>Wejdź do karczmy</h2>
+    <p>
+      Topka i antycheat potrzebują konta. Hasła nie są przechowywane
+      w bazie jako zwykły tekst, bo nawet karczmarz ma jakieś standardy.
+    </p>
+  </div>
+
+  <div class="auth-box">
+
+    <div class="auth-tabs">
+      <button id="loginTab" class="active">LOGOWANIE</button>
+      <button id="registerTab">REJESTRACJA</button>
+    </div>
+
+    <form id="loginForm">
+      <input
+        id="loginUsername"
+        autocomplete="username"
+        maxlength="24"
+        placeholder="Nick"
+        required
+      >
+
+      <input
+        id="loginPassword"
+        type="password"
+        autocomplete="current-password"
+        placeholder="Hasło"
+        required
+      >
+
+      <button class="cta" type="submit">ZALOGUJ</button>
+    </form>
+
+    <form id="registerForm" class="hidden">
+      <input
+        id="registerUsername"
+        autocomplete="username"
+        maxlength="24"
+        placeholder="Nick (3-24 znaki)"
+        required
+      >
+
+      <input
+        id="registerPassword"
+        type="password"
+        autocomplete="new-password"
+        minlength="8"
+        placeholder="Hasło (min. 8 znaków)"
+        required
+      >
+
+      <button class="cta" type="submit">UTWÓRZ KONTO</button>
+    </form>
+
+    <div id="authStatus" class="auth-status"></div>
+    <div id="authUser" class="auth-user"></div>
+
+  </div>
+</section>
+
+<section id="gra" class="cards">
+
+  <article>
+    <b>🍺 7 TRUNKÓW</b>
+    <span>Od Jasnego Piwa po Złoty Eliksir.</span>
+  </article>
+
+  <article>
+    <b>🏆 TOPKA</b>
+    <span>Porównuj wynik z innymi graczami.</span>
+  </article>
+
+  <article>
+    <b>📋 ZADANIA DZIENNE</b>
+    <span>Codzienny progres liczony od zera.</span>
+  </article>
+
+  <article>
+    <b>💾 ZAPIS W PRZEGLĄDARCE</b>
+    <span>Postęp siedzi w localStorage. Internet nie musi go pamiętać.</span>
+  </article>
+
+</section>
+
+<section id="topka" class="section">
+
+  <div>
+    <p class="eyebrow">RANKING</p>
+    <h2>Karczemna topka</h2>
+    <p>
+      Najlepsi klikacze są tutaj. Przynajmniej dopóki ktoś nie odkryje
+      kolejnego sposobu na oszukanie formularza.
+    </p>
+  </div>
+
+  <div id="topList" class="top-list">
+    Ładowanie...
+  </div>
+
+</section>
+
+<section id="info" class="section dark">
+  <p class="eyebrow">O GRZE</p>
+  <h2>Mały kufel. Duży problem.</h2>
+  <p>
+    TSNCG to clicker z fabułą, ulepszeniami, osiągnięciami, prestiżem,
+    Nową Grą+, zadaniami i karczemnym chaosem.
+    Wersja przeglądarkowa działa bez instalowania Electrona.
+  </p>
+</section>
+
 </main>
-<footer>TSNCG • 1.01 Beta • Człowiek kontra kufel, odwieczna wojna</footer>
-<script src="auth.js"></script>
+
+<footer>
+  TSNCG • 1.01 Beta • Człowiek kontra kufel, odwieczna wojna
+</footer>
+
 <script>
-async function loadTop(){const el=document.getElementById('topList');try{
-  const r=await fetch(${API_URL}/api/leaderboard,{cache:'no-store'});
-  const rows=await r.json();
-  el.innerHTML=rows.length
-    ? rows.slice(0,10).map((x,i)=>`<div><b>#${i+1} ${String(x.name).replace(/[<>]/g,'')}</b><span>💰 ${Math.floor(x.coins).toLocaleString('pl-PL')} • 👆 ${Math.floor(x.clicks).toLocaleString('pl-PL')}</span></div>`).join('')
-    : 'Topka jeszcze pusta.';
-}catch(e){
-  el.textContent='Serwer topki jest offline.';
-}
+const API_URL = 'https://tsncg.onrender.com';
 </script>
-</body></html>
+
+<script src="auth.js"></script>
+
+<script>
+async function loadTop() {
+  const el = document.getElementById('topList');
+
+  try {
+    const r = await fetch(${API_URL}/api/leaderboard, {
+      cache: 'no-store'
+    });
+
+    const rows = await r.json();
+
+    el.innerHTML = rows.length
+      ? rows.slice(0, 10).map((x, i) =>
+          `<div>
+            <b>#${i + 1} ${String(x.name).replace(/[<>]/g, '')}</b>
+            <span>
+              💰 ${Math.floor(x.coins).toLocaleString('pl-PL')}
+              • 👆 ${Math.floor(x.clicks).toLocaleString('pl-PL')}
+            </span>
+          </div>`
+        ).join('')
+      : 'Topka jeszcze pusta.';
+
+  } catch (e) {
+    el.textContent = 'Serwer topki jest offline.';
+  }
+}
+
+loadTop();
+</script>
+
+</body>
+</html>

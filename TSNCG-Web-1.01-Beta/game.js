@@ -1,3 +1,4 @@
+const API_URL = 'https://tsncg.onrender.com';
 let coins = 0;
 let clicks = 0;
 let clickPower = 1;

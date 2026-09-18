@@ -1,3 +1,4 @@
+const API_URL = 'https://tsncg.onrender.com';
 <!doctype html>
 <html lang="pl">
 <head>
@@ -19,7 +20,14 @@
 <footer>TSNCG • 1.01 Beta • Człowiek kontra kufel, odwieczna wojna</footer>
 <script src="auth.js"></script>
 <script>
-async function loadTop(){const el=document.getElementById('topList');try{const r=await fetch('/api/leaderboard',{cache:'no-store'});const rows=await r.json();el.innerHTML=rows.length?rows.slice(0,10).map((x,i)=>`<div><b>#${i+1} ${String(x.name).replace(/[<>]/g,'')}</b><span>💰 ${Math.floor(x.coins).toLocaleString('pl-PL')} • 👆 ${Math.floor(x.clicks).toLocaleString('pl-PL')}</span></div>`).join(''):'Topka jeszcze pusta.'}catch(e){el.textContent='Serwer topki jest offline.'}}
-loadTop();
+async function loadTop(){const el=document.getElementById('topList');try{
+  const r=await fetch(${API_URL}/api/leaderboard,{cache:'no-store'});
+  const rows=await r.json();
+  el.innerHTML=rows.length
+    ? rows.slice(0,10).map((x,i)=>`<div><b>#${i+1} ${String(x.name).replace(/[<>]/g,'')}</b><span>💰 ${Math.floor(x.coins).toLocaleString('pl-PL')} • 👆 ${Math.floor(x.clicks).toLocaleString('pl-PL')}</span></div>`).join('')
+    : 'Topka jeszcze pusta.';
+}catch(e){
+  el.textContent='Serwer topki jest offline.';
+}
 </script>
 </body></html>

@@ -210,27 +210,18 @@ function userFor(session) {
    CORS
 ========================= */
 
+```js
 function corsHeaders(req) {
   const origin = req.headers.origin;
 
-  /*
-    Cloudflare Pages:
-    - *.pages.dev
-    Local development:
-    - localhost
-    - 127.0.0.1
-
-    Jeśli później ustawisz własną domenę,
-    możesz dodać ją tutaj.
-  */
+  if (!origin) {
+    return {};
+  }
 
   const allowed =
-    origin &&
-    (
-      /^https:\/\/[a-zA-Z0-9-]+\.pages\.dev$/.test(origin) ||
-      /^https?:\/\/localhost(?::\d+)?$/.test(origin) ||
-      /^https?:\/\/127\.0\.0\.1(?::\d+)?$/.test(origin)
-    );
+    /^https:\/\/(?:[a-zA-Z0-9-]+\.)*pages\.dev$/.test(origin) ||
+    /^https?:\/\/localhost(?::\d+)?$/.test(origin) ||
+    /^https?:\/\/127\.0\.0\.1(?::\d+)?$/.test(origin);
 
   if (!allowed) {
     return {};
@@ -244,6 +235,7 @@ function corsHeaders(req) {
     'Vary': 'Origin'
   };
 }
+```
 
 /* =========================
    JSON

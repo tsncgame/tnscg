@@ -1,53 +1,29 @@
-```js
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { Pool } = require('pg');
 
 const ROOT = __dirname;
-const DB = path.join(ROOT, 'database.json');
 const PORT = Number(process.env.PORT) || 3000;
 
-const MAX = 100;
-const SESSION_TTL = 1000 * 60 * 60 * 24 * 7;
+const MAX_LEADERBOARD = 100;
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 dni
 
 const RATE = new Map();
-const SESSIONS = new Map();
 
-/* =========================
-   DATABASE
-========================= */
-
-function readDb() {
-  try {
-    return JSON.parse(fs.readFileSync(DB, 'utf8'));
-  } catch (_) {
-    return {
-      users: [],
-      leaderboard: []
-    };
-  }
+if (!process.env.DATABASE_URL) {
+  console.error('Brak zmiennej środowiskowej DATABASE_URL. Ustaw ją w panelu Render (Environment).');
+  process.exit(1);
 }
 
-function writeDb(db) {
-  const tmp = DB + '.tmp';
-
-  fs.writeFileSync(
-    tmp,
-    JSON.stringify(db, null, 2),
-    'utf8'
-  );
-
-  fs.renameSync(tmp, DB);
-}
-
-let db = readDb();
-
-if (!db.users) db.users = [];
-if (!db.leaderboard) db.leaderboard = [];
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
 /* =========================
-   USERS
+   USERS — walidacja
 ========================= */
 
 function cleanName(name) {
@@ -55,10 +31,6 @@ function cleanName(name) {
     .replace(/[<>]/g, '')
     .trim()
     .slice(0, 24);
-}
-
-function normalizeUsername(name) {
-  return cleanName(name).toLowerCase();
 }
 
 function validUsername(name) {
@@ -74,35 +46,23 @@ function validPassword(password) {
 }
 
 /* =========================
-   PASSWORDS
+   HASŁA
+   Trzymane razem w jednym polu password_hash jako "sól:hash".
 ========================= */
 
-function hashPassword(
-  password,
-  salt = crypto.randomBytes(16).toString('hex')
-) {
-  const hash = crypto
-    .scryptSync(password, salt, 64)
-    .toString('hex');
-
-  return {
-    salt,
-    hash
-  };
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
 }
 
-function verifyPassword(password, user) {
+function verifyPassword(password, storedHash) {
   try {
-    const got = crypto.scryptSync(
-      password,
-      user.salt,
-      64
-    );
+    const [salt, hash] = String(storedHash).split(':');
+    if (!salt || !hash) return false;
 
-    const expected = Buffer.from(
-      user.passwordHash,
-      'hex'
-    );
+    const got = crypto.scryptSync(password, salt, 64);
+    const expected = Buffer.from(hash, 'hex');
 
     return (
       expected.length === got.length &&
@@ -114,81 +74,81 @@ function verifyPassword(password, user) {
 }
 
 /* =========================
-   SESSIONS
+   SESJE
+   Token trafia do ciasteczka; w bazie trzymamy tylko jego hash (sha256),
+   więc kradzież zrzutu bazy nie daje gotowych tokenów sesji.
 ========================= */
 
-function token() {
+function newToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-function cookies(req) {
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function parseCookies(req) {
   const out = {};
 
   String(req.headers.cookie || '')
     .split(';')
     .forEach(x => {
       const i = x.indexOf('=');
-
       if (i > 0) {
-        out[x.slice(0, i).trim()] =
-          decodeURIComponent(
-            x.slice(i + 1).trim()
-          );
+        out[x.slice(0, i).trim()] = decodeURIComponent(x.slice(i + 1).trim());
       }
     });
 
   return out;
 }
 
-function getSession(req) {
-  const sid = cookies(req).tsncg_session;
+async function getSession(req) {
+  const token = parseCookies(req).tsncg_session;
+  if (!token) return null;
 
-  const session =
-    sid && SESSIONS.get(sid);
+  const tokenHash = hashToken(token);
 
-  if (
-    !session ||
-    session.expires < Date.now()
-  ) {
-    if (sid) {
-      SESSIONS.delete(sid);
-    }
+  const { rows } = await pool.query(
+    `SELECT id, user_id, verified_clicks, last_batch_at, expires_at
+     FROM sessions
+     WHERE token_hash = $1 AND expires_at > now()`,
+    [tokenHash]
+  );
 
-    return null;
-  }
+  const session = rows[0];
+  if (!session) return null;
 
-  session.expires =
-    Date.now() + SESSION_TTL;
+  const newExpiry = new Date(Date.now() + SESSION_TTL_MS);
+  await pool.query(`UPDATE sessions SET expires_at = $1 WHERE id = $2`, [
+    newExpiry,
+    session.id
+  ]);
 
-  return {
-    sid,
-    ...session
-  };
+  return session;
 }
 
-function setSession(res, user) {
-  const sid = token();
+async function setSession(res, userId) {
+  const token = newToken();
+  const tokenHash = hashToken(token);
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 
-  SESSIONS.set(sid, {
-    userId: user.id,
-    expires: Date.now() + SESSION_TTL,
-    startedAt: Date.now(),
-    verifiedClicks: 0,
-    lastBatch: Date.now()
-  });
+  await pool.query(
+    `INSERT INTO sessions (user_id, token_hash, expires_at, created_at, verified_clicks, last_batch_at)
+     VALUES ($1, $2, $3, now(), 0, now())`,
+    [userId, tokenHash, expiresAt]
+  );
 
   res.setHeader(
     'Set-Cookie',
-    `tsncg_session=${sid}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=${SESSION_TTL / 1000}`
+    `tsncg_session=${token}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=${SESSION_TTL_MS / 1000}`
   );
 }
 
-function clearSession(res, req) {
-  const sid =
-    cookies(req).tsncg_session;
+async function clearSession(res, req) {
+  const token = parseCookies(req).tsncg_session;
 
-  if (sid) {
-    SESSIONS.delete(sid);
+  if (token) {
+    await pool.query(`DELETE FROM sessions WHERE token_hash = $1`, [hashToken(token)]);
   }
 
   res.setHeader(
@@ -197,35 +157,31 @@ function clearSession(res, req) {
   );
 }
 
-function userFor(session) {
-  return (
-    session &&
-    db.users.find(
-      u => u.id === session.userId
-    )
+async function userForSession(session) {
+  if (!session) return null;
+
+  const { rows } = await pool.query(
+    `SELECT id, username, kapsle FROM users WHERE id = $1`,
+    [session.user_id]
   );
+
+  return rows[0] || null;
 }
 
 /* =========================
    CORS
 ========================= */
 
-```js
 function corsHeaders(req) {
   const origin = req.headers.origin;
-
-  if (!origin) {
-    return {};
-  }
+  if (!origin) return {};
 
   const allowed =
     /^https:\/\/(?:[a-zA-Z0-9-]+\.)*pages\.dev$/.test(origin) ||
     /^https?:\/\/localhost(?::\d+)?$/.test(origin) ||
     /^https?:\/\/127\.0\.0\.1(?::\d+)?$/.test(origin);
 
-  if (!allowed) {
-    return {};
-  }
+  if (!allowed) return {};
 
   return {
     'Access-Control-Allow-Origin': origin,
@@ -235,121 +191,66 @@ function corsHeaders(req) {
     'Vary': 'Origin'
   };
 }
-```
 
 /* =========================
-   JSON
+   JSON / RATE LIMIT / BODY
 ========================= */
 
-function json(
-  res,
-  status,
-  data,
-  extra = {}
-) {
+function json(res, status, data, extra = {}) {
   const body = JSON.stringify(data);
 
-  res.writeHead(
-    status,
-    {
-      'Content-Type':
-        'application/json; charset=utf-8',
-
-      'Cache-Control':
-        'no-store',
-
-      'X-Content-Type-Options':
-        'nosniff',
-
-      'X-Frame-Options':
-        'SAMEORIGIN',
-
-      'Referrer-Policy':
-        'same-origin',
-
-      ...extra
-    }
-  );
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'SAMEORIGIN',
+    'Referrer-Policy': 'same-origin',
+    ...extra
+  });
 
   res.end(body);
 }
 
-/* =========================
-   RATE LIMIT
-========================= */
-
-function rateLimit(
-  req,
-  key,
-  max,
-  windowMs
-) {
-  const ip =
-    req.socket.remoteAddress ||
-    'unknown';
-
+function rateLimit(req, key, max, windowMs) {
+  const ip = req.socket.remoteAddress || 'unknown';
   const now = Date.now();
+  const k = key + ':' + ip;
 
-  const k =
-    key + ':' + ip;
+  const x = RATE.get(k) || { start: now, count: 0 };
 
-  const x =
-    RATE.get(k) || {
-      start: now,
-      count: 0
-    };
-
-  if (
-    now - x.start >
-    windowMs
-  ) {
+  if (now - x.start > windowMs) {
     x.start = now;
     x.count = 0;
   }
 
   x.count++;
-
   RATE.set(k, x);
 
   return x.count <= max;
 }
 
-/* =========================
-   REQUEST BODY
-========================= */
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
 
-function body(req) {
-  return new Promise(
-    (resolve, reject) => {
-      let data = '';
+    req.on('data', chunk => {
+      data += chunk;
+      if (data.length > 1e6) {
+        reject(new Error('too large'));
+        req.destroy();
+      }
+    });
 
-      req.on('data', chunk => {
-        data += chunk;
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(data || '{}'));
+      } catch (e) {
+        reject(e);
+      }
+    });
 
-        if (data.length > 1e6) {
-          reject(
-            new Error('too large')
-          );
-
-          req.destroy();
-        }
-      });
-
-      req.on('end', () => {
-        try {
-          resolve(
-            JSON.parse(
-              data || '{}'
-            )
-          );
-        } catch (e) {
-          reject(e);
-        }
-      });
-
-      req.on('error', reject);
-    }
-  );
+    req.on('error', reject);
+  });
 }
 
 /* =========================
@@ -357,115 +258,24 @@ function body(req) {
 ========================= */
 
 function cleanStats(data) {
-  const n = x =>
-    Math.max(
-      0,
-      Math.floor(
-        Number(x) || 0
-      )
-    );
+  const n = x => Math.max(0, Math.floor(Number(x) || 0));
 
   return {
     coins: n(data.coins),
     clicks: n(data.clicks),
-    level: Math.max(
-      1,
-      n(data.level)
-    ),
-    criticalClicks:
-      n(data.criticalClicks)
+    level: Math.max(1, n(data.level)),
+    criticalClicks: n(data.criticalClicks)
   };
 }
 
-/* =========================
-   LEADERBOARD
-========================= */
-
-function updateLeaderboard(
-  user,
-  stats
-) {
-  const existing =
-    db.leaderboard.find(
-      x => x.userId === user.id
-    );
-
-  const row =
-    existing ||
-    {
-      userId: user.id,
-      username: user.username,
-      verifiedClicks: 0,
-      coins: 0,
-      clicks: 0,
-      level: 1,
-      updatedAt:
-        new Date().toISOString()
-    };
-
-  row.username =
-    user.username;
-
-  row.coins =
-    Math.max(
-      row.coins,
-      stats.coins
-    );
-
-  row.clicks =
-    Math.max(
-      row.clicks,
-      stats.clicks
-    );
-
-  row.level =
-    Math.max(
-      row.level,
-      stats.level
-    );
-
-  row.verifiedClicks =
-    Math.max(
-      row.verifiedClicks,
-      stats.verifiedClicks || 0
-    );
-
-  row.updatedAt =
-    new Date().toISOString();
-
-  if (!existing) {
-    db.leaderboard.push(row);
-  }
-
-  db.leaderboard.sort(
-    (a, b) =>
-      b.coins - a.coins ||
-      b.verifiedClicks -
-        a.verifiedClicks ||
-      b.clicks - a.clicks ||
-      b.level - a.level
-  );
-
-  db.leaderboard =
-    db.leaderboard.slice(
-      0,
-      MAX
-    );
-
-  writeDb(db);
-
-  return row;
-}
-
-function publicRow(x, i) {
+function publicRow(row, i) {
   return {
     rank: i + 1,
-    name: x.username,
-    coins: x.coins,
-    clicks: x.clicks,
-    level: x.level,
-    verifiedClicks:
-      x.verifiedClicks
+    name: row.username,
+    coins: Number(row.coins),
+    clicks: Number(row.clicks),
+    level: row.level,
+    verifiedClicks: Number(row.verified_clicks)
   };
 }
 
@@ -473,808 +283,579 @@ function publicRow(x, i) {
    SERVER
 ========================= */
 
-const server =
-  http.createServer(
-    async (req, res) => {
+const server = http.createServer(async (req, res) => {
+  let route;
 
-      const route =
-        req.url.split('?')[0];
+  try {
+    route = decodeURIComponent(req.url.split('?')[0]);
+  } catch (_) {
+    return json(res, 400, { error: 'Bad URL' });
+  }
 
-      /*
-        CORS dla API
-      */
+  const cors = corsHeaders(req);
 
-      const cors =
-        corsHeaders(req);
+  if (route.startsWith('/api/')) {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, cors);
+      return res.end();
+    }
 
-      if (route.startsWith('/api/')) {
+    let session = null;
+    let user = null;
 
-        /*
-          Preflight
-        */
+    try {
+      session = await getSession(req);
+      user = await userForSession(session);
+    } catch (err) {
+      console.error('Błąd sesji/DB:', err.message);
+      return json(res, 500, { error: 'Błąd serwera.' }, cors);
+    }
 
-        if (req.method === 'OPTIONS') {
-          res.writeHead(
-            204,
-            cors
+    /* ===================== REGISTER ===================== */
+    if (route === '/api/register' && req.method === 'POST') {
+      if (!rateLimit(req, 'register', 5, 60_000)) {
+        return json(res, 429, { error: 'Za dużo prób. Spróbuj później.' }, cors);
+      }
+
+      try {
+        const data = await readBody(req);
+        const username = cleanName(data.username);
+        const password = data.password;
+
+        if (!validUsername(username)) {
+          return json(res, 400, { error: 'Nick: 3-24 znaków, litery/cyfry/_/-.' }, cors);
+        }
+
+        if (!validPassword(password)) {
+          return json(res, 400, { error: 'Hasło musi mieć 8-128 znaków.' }, cors);
+        }
+
+        const passwordHash = hashPassword(password);
+
+        let newUserId;
+
+        try {
+          const { rows } = await pool.query(
+            `INSERT INTO users (username, password_hash, created_at)
+             VALUES ($1, $2, now())
+             RETURNING id`,
+            [username, passwordHash]
           );
-
-          return res.end();
+          newUserId = rows[0].id;
+        } catch (err) {
+          if (err.code === '23505') {
+            return json(res, 409, { error: 'Taki nick już istnieje.' }, cors);
+          }
+          throw err;
         }
 
-        const session =
-          getSession(req);
+        await pool.query(
+          `INSERT INTO scores (user_id, clicks, level, coins, verified_clicks, updated_at)
+           VALUES ($1, 0, 1, 0, 0, now())
+           ON CONFLICT (user_id) DO NOTHING`,
+          [newUserId]
+        );
 
-        const user =
-          userFor(session);
+        await setSession(res, newUserId);
 
-        /* =====================
-           REGISTER
-        ===================== */
+        return json(res, 201, { ok: true, user: { username } }, cors);
+      } catch (_) {
+        return json(res, 400, { error: 'Nieprawidłowe dane.' }, cors);
+      }
+    }
 
-        if (
-          route === '/api/register' &&
-          req.method === 'POST'
-        ) {
-          if (
-            !rateLimit(
-              req,
-              'register',
-              5,
-              60_000
-            )
-          ) {
-            return json(
-              res,
-              429,
-              {
-                error:
-                  'Za dużo prób. Spróbuj później.'
-              },
-              cors
-            );
-          }
+    /* ===================== LOGIN ===================== */
+    if (route === '/api/login' && req.method === 'POST') {
+      if (!rateLimit(req, 'login', 10, 60_000)) {
+        return json(res, 429, { error: 'Za dużo prób logowania. Spróbuj później.' }, cors);
+      }
 
-          try {
-            const data =
-              await body(req);
+      try {
+        const data = await readBody(req);
+        const username = cleanName(data.username);
 
-            const username =
-              cleanName(
-                data.username
-              );
+        const { rows } = await pool.query(
+          `SELECT id, username, password_hash FROM users WHERE LOWER(username) = LOWER($1)`,
+          [username]
+        );
 
-            const normalized =
-              normalizeUsername(
-                username
-              );
+        const u = rows[0];
 
-            const password =
-              data.password;
-
-            if (
-              !validUsername(
-                username
-              )
-            ) {
-              return json(
-                res,
-                400,
-                {
-                  error:
-                    'Nick: 3-24 znaków, litery/cyfry/_/-.'
-                },
-                cors
-              );
-            }
-
-            if (
-              !validPassword(
-                password
-              )
-            ) {
-              return json(
-                res,
-                400,
-                {
-                  error:
-                    'Hasło musi mieć 8-128 znaków.'
-                },
-                cors
-              );
-            }
-
-            if (
-              db.users.some(
-                u =>
-                  u.usernameNormalized ===
-                  normalized
-              )
-            ) {
-              return json(
-                res,
-                409,
-                {
-                  error:
-                    'Taki nick już istnieje.'
-                },
-                cors
-              );
-            }
-
-            const hp =
-              hashPassword(
-                password
-              );
-
-            const u = {
-              id:
-                crypto.randomUUID(),
-
-              username,
-
-              passwordHash:
-                hp.hash,
-
-              salt:
-                hp.salt,
-
-              createdAt:
-                new Date().toISOString(),
-
-              usernameNormalized:
-                normalized
-            };
-
-            db.users.push(u);
-
-            writeDb(db);
-
-            setSession(
-              res,
-              u
-            );
-
-            return json(
-              res,
-              201,
-              {
-                ok: true,
-                user: {
-                  username:
-                    u.username
-                }
-              },
-              cors
-            );
-
-          } catch (_) {
-            return json(
-              res,
-              400,
-              {
-                error:
-                  'Nieprawidłowe dane.'
-              },
-              cors
-            );
-          }
+        if (!u || !verifyPassword(data.password || '', u.password_hash)) {
+          return json(res, 401, { error: 'Nieprawidłowy nick lub hasło.' }, cors);
         }
 
-        /* =====================
-           LOGIN
-        ===================== */
+        await setSession(res, u.id);
 
-        if (
-          route === '/api/login' &&
-          req.method === 'POST'
-        ) {
-          if (
-            !rateLimit(
-              req,
-              'login',
-              10,
-              60_000
-            )
-          ) {
-            return json(
-              res,
-              429,
-              {
-                error:
-                  'Za dużo prób logowania. Spróbuj później.'
-              },
-              cors
-            );
-          }
+        return json(res, 200, { ok: true, user: { username: u.username } }, cors);
+      } catch (_) {
+        return json(res, 400, { error: 'Nieprawidłowe dane.' }, cors);
+      }
+    }
 
-          try {
-            const data =
-              await body(req);
+    /* ===================== LOGOUT ===================== */
+    if (route === '/api/logout' && req.method === 'POST') {
+      await clearSession(res, req);
+      return json(res, 200, { ok: true }, cors);
+    }
 
-            const u =
-              db.users.find(
-                x =>
-                  x.usernameNormalized ===
-                  normalizeUsername(
-                    data.username
-                  )
-              );
+    /* ===================== ME ===================== */
+    if (route === '/api/me' && req.method === 'GET') {
+      if (!user) {
+        return json(res, 401, { authenticated: false }, cors);
+      }
 
-            if (
-              !u ||
-              !verifyPassword(
-                data.password || '',
-                u
-              )
-            ) {
-              return json(
-                res,
-                401,
-                {
-                  error:
-                    'Nieprawidłowy nick lub hasło.'
-                },
-                cors
-              );
-            }
+      return json(
+        res,
+        200,
+        {
+          authenticated: true,
+          user: { username: user.username, kapsle: Number(user.kapsle) }
+        },
+        cors
+      );
+    }
 
-            setSession(
-              res,
-              u
-            );
+    /* ===================== VERIFY CLICKS ===================== */
+    if (route === '/api/verify-clicks' && req.method === 'POST') {
+      if (!user || !session) {
+        return json(res, 401, { error: 'Zaloguj się.' }, cors);
+      }
 
-            return json(
-              res,
-              200,
-              {
-                ok: true,
-                user: {
-                  username:
-                    u.username
-                }
-              },
-              cors
-            );
+      if (!rateLimit(req, 'clickbatch', 120, 60_000)) {
+        return json(res, 429, { error: 'Za dużo żądań.' }, cors);
+      }
 
-          } catch (_) {
-            return json(
-              res,
-              400,
-              {
-                error:
-                  'Nieprawidłowe dane.'
-              },
-              cors
-            );
-          }
+      try {
+        const data = await readBody(req);
+        const delta = Math.floor(Number(data.delta) || 0);
+        const now = Date.now();
+
+        if (delta < 0 || delta > 50) {
+          return json(res, 400, { error: 'Podejrzany pakiet klików.' }, cors);
         }
 
-        /* =====================
-           LOGOUT
-        ===================== */
+        const lastBatch = new Date(session.last_batch_at).getTime();
+        const elapsed = Math.max(1, now - lastBatch) / 1000;
+        const allowed = Math.min(50, Math.ceil(elapsed * 45) + 5);
 
-        if (
-          route === '/api/logout' &&
-          req.method === 'POST'
-        ) {
-          clearSession(
-            res,
-            req
-          );
-
+        if (delta > allowed) {
           return json(
             res,
-            200,
+            429,
             {
-              ok: true
+              error: 'Tempo klików przekracza limit antycheata.',
+              verifiedClicks: Number(session.verified_clicks)
             },
             cors
           );
         }
 
-        /* =====================
-           ME
-        ===================== */
-
-        if (
-          route === '/api/me' &&
-          req.method === 'GET'
-        ) {
-          if (!user) {
-            return json(
-              res,
-              401,
-              {
-                authenticated:
-                  false
-              },
-              cors
-            );
-          }
-
-          return json(
-            res,
-            200,
-            {
-              authenticated:
-                true,
-
-              user: {
-                username:
-                  user.username
-              }
-            },
-            cors
-          );
-        }
-
-        /* =====================
-           VERIFY CLICKS
-        ===================== */
-
-        if (
-          route === '/api/verify-clicks' &&
-          req.method === 'POST'
-        ) {
-          if (
-            !user ||
-            !session
-          ) {
-            return json(
-              res,
-              401,
-              {
-                error:
-                  'Zaloguj się.'
-              },
-              cors
-            );
-          }
-
-          if (
-            !rateLimit(
-              req,
-              'clickbatch',
-              120,
-              60_000
-            )
-          ) {
-            return json(
-              res,
-              429,
-              {
-                error:
-                  'Za dużo żądań.'
-              },
-              cors
-            );
-          }
-
-          try {
-            const data =
-              await body(req);
-
-            const delta =
-              Math.floor(
-                Number(
-                  data.delta
-                ) || 0
-              );
-
-            const now =
-              Date.now();
-
-            if (
-              delta < 0 ||
-              delta > 50
-            ) {
-              return json(
-                res,
-                400,
-                {
-                  error:
-                    'Podejrzany pakiet klików.'
-                },
-                cors
-              );
-            }
-
-            const elapsed =
-              Math.max(
-                1,
-                now -
-                  session.lastBatch
-              ) / 1000;
-
-            const allowed =
-              Math.min(
-                50,
-                Math.ceil(
-                  elapsed * 45
-                ) + 5
-              );
-
-            if (
-              delta >
-              allowed
-            ) {
-              return json(
-                res,
-                429,
-                {
-                  error:
-                    'Tempo klików przekracza limit antycheata.',
-                  verifiedClicks:
-                    session.verifiedClicks
-                },
-                cors
-              );
-            }
-
-            session.verifiedClicks +=
-              delta;
-
-            session.lastBatch =
-              now;
-
-            return json(
-              res,
-              200,
-              {
-                ok: true,
-                verifiedClicks:
-                  session.verifiedClicks
-              },
-              cors
-            );
-
-          } catch (_) {
-            return json(
-              res,
-              400,
-              {
-                error:
-                  'Nieprawidłowy pakiet.'
-              },
-              cors
-            );
-          }
-        }
-
-        /* =====================
-           LEADERBOARD GET
-        ===================== */
-
-        if (
-          route === '/api/leaderboard' &&
-          req.method === 'GET'
-        ) {
-          return json(
-            res,
-            200,
-            db.leaderboard.map(
-              publicRow
-            ),
-            cors
-          );
-        }
-
-        /* =====================
-           LEADERBOARD POST
-        ===================== */
-
-        if (
-          route === '/api/leaderboard' &&
-          req.method === 'POST'
-        ) {
-          if (
-            !user ||
-            !session
-          ) {
-            return json(
-              res,
-              401,
-              {
-                error:
-                  'Zaloguj się, żeby wejść do topki.'
-              },
-              cors
-            );
-          }
-
-          if (
-            !rateLimit(
-              req,
-              'score',
-              6,
-              60_000
-            )
-          ) {
-            return json(
-              res,
-              429,
-              {
-                error:
-                  'Za dużo zgłoszeń wyniku.'
-              },
-              cors
-            );
-          }
-
-          try {
-            const stats =
-              cleanStats(
-                await body(req)
-              );
-
-            const existing =
-              db.leaderboard.find(
-                x =>
-                  x.userId ===
-                  user.id
-              );
-
-            const previousClicks =
-              existing?.clicks || 0;
-
-            const verified =
-              Math.max(
-                session.verifiedClicks,
-                existing?.verifiedClicks ||
-                  0
-              );
-
-            if (
-              stats.clicks <
-              previousClicks
-            ) {
-              return json(
-                res,
-                400,
-                {
-                  error:
-                    'Wynik klików nie może się cofać.'
-                },
-                cors
-              );
-            }
-
-            const newClicks =
-              stats.clicks -
-              previousClicks;
-
-            const maxUnverified =
-              verified + 500;
-
-            if (
-              stats.clicks >
-              maxUnverified
-            ) {
-              return json(
-                res,
-                400,
-                {
-                  error:
-                    'Wynik odrzucony przez antycheat. Graj normalnie i zgłaszaj wynik po synchronizacji.',
-                  verifiedClicks:
-                    verified
-                },
-                cors
-              );
-            }
-
-            if (
-              stats.coins >
-                10 ** 15 ||
-              stats.clicks >
-                10 ** 12 ||
-              stats.level >
-                1e6
-            ) {
-              return json(
-                res,
-                400,
-                {
-                  error:
-                    'Wynik poza limitem.'
-                },
-                cors
-              );
-            }
-
-            const row =
-              updateLeaderboard(
-                user,
-                {
-                  ...stats,
-                  verifiedClicks:
-                    Math.max(
-                      verified,
-                      newClicks +
-                        previousClicks
-                    )
-                }
-              );
-
-            return json(
-              res,
-              201,
-              publicRow(
-                row,
-                db.leaderboard.indexOf(
-                  row
-                )
-              ),
-              cors
-            );
-
-          } catch (_) {
-            return json(
-              res,
-              400,
-              {
-                error:
-                  'Nieprawidłowe dane.'
-              },
-              cors
-            );
-          }
-        }
-
-        /* =====================
-           API 404
-        ===================== */
+        const { rows } = await pool.query(
+          `UPDATE sessions
+           SET verified_clicks = verified_clicks + $1, last_batch_at = now()
+           WHERE id = $2
+           RETURNING verified_clicks`,
+          [delta, session.id]
+        );
 
         return json(
           res,
-          404,
+          200,
+          { ok: true, verifiedClicks: Number(rows[0].verified_clicks) },
+          cors
+        );
+      } catch (_) {
+        return json(res, 400, { error: 'Nieprawidłowy pakiet.' }, cors);
+      }
+    }
+
+    /* ===================== LEADERBOARD GET ===================== */
+    if (route === '/api/leaderboard' && req.method === 'GET') {
+      const { rows } = await pool.query(
+        `SELECT u.username, s.coins, s.clicks, s.level, s.verified_clicks
+         FROM scores s
+         JOIN users u ON u.id = s.user_id
+         ORDER BY s.coins DESC, s.verified_clicks DESC, s.clicks DESC, s.level DESC
+         LIMIT $1`,
+        [MAX_LEADERBOARD]
+      );
+
+      return json(res, 200, rows.map(publicRow), cors);
+    }
+
+    /* ===================== LEADERBOARD POST ===================== */
+    if (route === '/api/leaderboard' && req.method === 'POST') {
+      if (!user || !session) {
+        return json(res, 401, { error: 'Zaloguj się, żeby wejść do topki.' }, cors);
+      }
+
+      if (!rateLimit(req, 'score', 6, 60_000)) {
+        return json(res, 429, { error: 'Za dużo zgłoszeń wyniku.' }, cors);
+      }
+
+      try {
+        const stats = cleanStats(await readBody(req));
+
+        const { rows: existingRows } = await pool.query(
+          `SELECT clicks, verified_clicks FROM scores WHERE user_id = $1`,
+          [user.id]
+        );
+
+        const existing = existingRows[0];
+        const previousClicks = existing ? Number(existing.clicks) : 0;
+        const verified = Math.max(
+          Number(session.verified_clicks),
+          existing ? Number(existing.verified_clicks) : 0
+        );
+
+        if (stats.clicks < previousClicks) {
+          return json(res, 400, { error: 'Wynik klików nie może się cofać.' }, cors);
+        }
+
+        const newClicks = stats.clicks - previousClicks;
+        const maxUnverified = verified + 500;
+
+        if (stats.clicks > maxUnverified) {
+          return json(
+            res,
+            400,
+            {
+              error: 'Wynik odrzucony przez antycheat. Graj normalnie i zgłaszaj wynik po synchronizacji.',
+              verifiedClicks: verified
+            },
+            cors
+          );
+        }
+
+        if (stats.coins > 10 ** 15 || stats.clicks > 10 ** 12 || stats.level > 1e6) {
+          return json(res, 400, { error: 'Wynik poza limitem.' }, cors);
+        }
+
+        const finalVerified = Math.max(verified, newClicks + previousClicks);
+
+        const { rows } = await pool.query(
+          `INSERT INTO scores (user_id, coins, clicks, level, verified_clicks, updated_at)
+           VALUES ($1, $2, $3, $4, $5, now())
+           ON CONFLICT (user_id) DO UPDATE SET
+             coins = GREATEST(scores.coins, EXCLUDED.coins),
+             clicks = GREATEST(scores.clicks, EXCLUDED.clicks),
+             level = GREATEST(scores.level, EXCLUDED.level),
+             verified_clicks = GREATEST(scores.verified_clicks, EXCLUDED.verified_clicks),
+             updated_at = now()
+           RETURNING coins, clicks, level, verified_clicks`,
+          [user.id, stats.coins, stats.clicks, stats.level, finalVerified]
+        );
+
+        const row = rows[0];
+
+        const { rows: rankRows } = await pool.query(
+          `SELECT COUNT(*)::int AS rank
+           FROM scores
+           WHERE coins > $1
+              OR (coins = $1 AND verified_clicks > $2)
+              OR (coins = $1 AND verified_clicks = $2 AND clicks > $3)`,
+          [row.coins, row.verified_clicks, row.clicks]
+        );
+
+        return json(
+          res,
+          201,
           {
-            error:
-              'API not found'
+            rank: rankRows[0].rank + 1,
+            name: user.username,
+            coins: Number(row.coins),
+            clicks: Number(row.clicks),
+            level: row.level,
+            verifiedClicks: Number(row.verified_clicks)
           },
           cors
         );
+      } catch (_) {
+        return json(res, 400, { error: 'Nieprawidłowe dane.' }, cors);
+      }
+    }
+
+    /* ===================== REDEEM PROMO CODE ===================== */
+    if (route === '/api/redeem' && req.method === 'POST') {
+      if (!user) {
+        return json(res, 401, { error: 'Zaloguj się, żeby wykorzystać kod.' }, cors);
       }
 
-      /* =======================
-         STATIC FILES
-      ======================= */
+      if (!rateLimit(req, 'redeem', 10, 60_000)) {
+        return json(res, 429, { error: 'Za dużo prób. Spróbuj później.' }, cors);
+      }
 
-      serveFile(
-        req,
-        res
+      const client = await pool.connect();
+
+      try {
+        const data = await readBody(req);
+        const code = String(data.code || '').trim().toUpperCase();
+
+        if (!code) {
+          return json(res, 400, { error: 'Podaj kod.' }, cors);
+        }
+
+        await client.query('BEGIN');
+
+        const { rows: codeRows } = await client.query(
+          `SELECT id, kapsle_reward, uses_left, active, expires_at
+           FROM promo_codes
+           WHERE code = $1
+           FOR UPDATE`,
+          [code]
+        );
+
+        const promo = codeRows[0];
+
+        if (!promo || !promo.active) {
+          await client.query('ROLLBACK');
+          return json(res, 404, { error: 'Nieprawidłowy kod.' }, cors);
+        }
+
+        if (promo.expires_at && new Date(promo.expires_at) < new Date()) {
+          await client.query('ROLLBACK');
+          return json(res, 410, { error: 'Ten kod już wygasł.' }, cors);
+        }
+
+        if (promo.uses_left <= 0) {
+          await client.query('ROLLBACK');
+          return json(res, 410, { error: 'Ten kod został już w pełni wykorzystany.' }, cors);
+        }
+
+        const { rows: alreadyUsed } = await client.query(
+          `SELECT 1 FROM promo_redemptions WHERE user_id = $1 AND code_id = $2`,
+          [user.id, promo.id]
+        );
+
+        if (alreadyUsed[0]) {
+          await client.query('ROLLBACK');
+          return json(res, 409, { error: 'Już wykorzystałeś ten kod.' }, cors);
+        }
+
+        await client.query(
+          `UPDATE promo_codes SET uses_left = uses_left - 1 WHERE id = $1`,
+          [promo.id]
+        );
+
+        await client.query(
+          `INSERT INTO promo_redemptions (user_id, code_id) VALUES ($1, $2)`,
+          [user.id, promo.id]
+        );
+
+        const { rows: userRows } = await client.query(
+          `UPDATE users SET kapsle = kapsle + $1 WHERE id = $2 RETURNING kapsle`,
+          [promo.kapsle_reward, user.id]
+        );
+
+        await client.query('COMMIT');
+
+        return json(
+          res,
+          200,
+          {
+            ok: true,
+            reward: promo.kapsle_reward,
+            kapsle: Number(userRows[0].kapsle)
+          },
+          cors
+        );
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Błąd redeem:', err.message);
+        return json(res, 500, { error: 'Błąd serwera.' }, cors);
+      } finally {
+        client.release();
+      }
+    }
+
+    /* ===================== ACHIEVEMENTS ===================== */
+    if (route === '/api/achievements' && req.method === 'GET') {
+      if (!user) {
+        return json(res, 401, { error: 'Zaloguj się.' }, cors);
+      }
+
+      const { rows } = await pool.query(
+        `SELECT achievement_id, unlocked_at FROM achievements WHERE user_id = $1`,
+        [user.id]
+      );
+
+      return json(
+        res,
+        200,
+        rows.map(r => ({ id: r.achievement_id, unlockedAt: r.unlocked_at })),
+        cors
       );
     }
-  );
+
+    if (route === '/api/achievements/unlock' && req.method === 'POST') {
+      if (!user) {
+        return json(res, 401, { error: 'Zaloguj się.' }, cors);
+      }
+
+      if (!rateLimit(req, 'achievement', 30, 60_000)) {
+        return json(res, 429, { error: 'Za dużo żądań.' }, cors);
+      }
+
+      try {
+        const data = await readBody(req);
+        const achievementId = String(data.achievementId || '').trim().slice(0, 64);
+
+        if (!achievementId) {
+          return json(res, 400, { error: 'Brak identyfikatora achievementu.' }, cors);
+        }
+
+        await pool.query(
+          `INSERT INTO achievements (user_id, achievement_id, unlocked_at)
+           VALUES ($1, $2, now())
+           ON CONFLICT (user_id, achievement_id) DO NOTHING`,
+          [user.id, achievementId]
+        );
+
+        return json(res, 200, { ok: true }, cors);
+      } catch (_) {
+        return json(res, 400, { error: 'Nieprawidłowe dane.' }, cors);
+      }
+    }
+
+    /* ===================== DAILY QUESTS ===================== */
+    if (route === '/api/daily-quests' && req.method === 'GET') {
+      if (!user) {
+        return json(res, 401, { error: 'Zaloguj się.' }, cors);
+      }
+
+      const { rows } = await pool.query(
+        `SELECT quest_id, progress, completed
+         FROM daily_quests
+         WHERE user_id = $1 AND quest_date = CURRENT_DATE`,
+        [user.id]
+      );
+
+      return json(
+        res,
+        200,
+        rows.map(r => ({
+          id: r.quest_id,
+          progress: Number(r.progress),
+          completed: r.completed
+        })),
+        cors
+      );
+    }
+
+    if (route === '/api/daily-quests/progress' && req.method === 'POST') {
+      if (!user) {
+        return json(res, 401, { error: 'Zaloguj się.' }, cors);
+      }
+
+      if (!rateLimit(req, 'quest', 60, 60_000)) {
+        return json(res, 429, { error: 'Za dużo żądań.' }, cors);
+      }
+
+      try {
+        const data = await readBody(req);
+        const questId = String(data.questId || '').trim().slice(0, 64);
+        const progress = Math.max(0, Math.floor(Number(data.progress) || 0));
+        const completed = Boolean(data.completed);
+
+        if (!questId) {
+          return json(res, 400, { error: 'Brak identyfikatora questa.' }, cors);
+        }
+
+        await pool.query(
+          `INSERT INTO daily_quests (user_id, quest_date, quest_id, progress, completed)
+           VALUES ($1, CURRENT_DATE, $2, $3, $4)
+           ON CONFLICT (user_id, quest_date, quest_id) DO UPDATE SET
+             progress = GREATEST(daily_quests.progress, EXCLUDED.progress),
+             completed = daily_quests.completed OR EXCLUDED.completed`,
+          [user.id, questId, progress, completed]
+        );
+
+        return json(res, 200, { ok: true }, cors);
+      } catch (_) {
+        return json(res, 400, { error: 'Nieprawidłowe dane.' }, cors);
+      }
+    }
+
+    /* ===================== API 404 ===================== */
+    return json(res, 404, { error: 'API not found' }, cors);
+  }
+
+  /* ======================= STATIC FILES ======================= */
+  serveFile(req, res);
+});
 
 /* =========================
    STATIC SERVER
 ========================= */
 
-function serveFile(
-  req,
-  res
-) {
+function serveFile(req, res) {
   let url;
 
   try {
-    url =
-      decodeURIComponent(
-        req.url.split('?')[0]
-      );
+    url = decodeURIComponent(req.url.split('?')[0]);
   } catch (_) {
-    return json(
-      res,
-      400,
-      {
-        error:
-          'Bad URL'
-      }
-    );
+    return json(res, 400, { error: 'Bad URL' });
   }
 
-  if (url === '/') {
-    url = '/index.html';
+  if (url === '/') url = '/index.html';
+
+  const file = path.normalize(path.join(ROOT, url));
+
+  if (!file.startsWith(ROOT)) {
+    return json(res, 403, { error: 'Forbidden' });
   }
 
-  const file =
-    path.normalize(
-      path.join(
-        ROOT,
-        url
-      )
-    );
-
-  if (
-    !file.startsWith(ROOT)
-  ) {
-    return json(
-      res,
-      403,
-      {
-        error:
-          'Forbidden'
-      }
-    );
-  }
-
-  fs.stat(
-    file,
-    (err, st) => {
-      if (
-        err ||
-        !st.isFile()
-      ) {
-        return json(
-          res,
-          404,
-          {
-            error:
-              'Not found'
-          }
-        );
-      }
-
-      const ext =
-        path.extname(
-          file
-        ).toLowerCase();
-
-      const types = {
-        '.html':
-          'text/html; charset=utf-8',
-
-        '.js':
-          'text/javascript; charset=utf-8',
-
-        '.css':
-          'text/css; charset=utf-8',
-
-        '.json':
-          'application/json; charset=utf-8',
-
-        '.png':
-          'image/png',
-
-        '.wav':
-          'audio/wav'
-      };
-
-      res.writeHead(
-        200,
-        {
-          'Content-Type':
-            types[ext] ||
-            'application/octet-stream',
-
-          'X-Content-Type-Options':
-            'nosniff',
-
-          'X-Frame-Options':
-            'SAMEORIGIN',
-
-          'Referrer-Policy':
-            'same-origin'
-        }
-      );
-
-      fs.createReadStream(
-        file
-      ).pipe(res);
+  fs.stat(file, (err, st) => {
+    if (err || !st.isFile()) {
+      return json(res, 404, { error: 'Not found' });
     }
-  );
+
+    const ext = path.extname(file).toLowerCase();
+
+    const types = {
+      '.html': 'text/html; charset=utf-8',
+      '.js': 'text/javascript; charset=utf-8',
+      '.css': 'text/css; charset=utf-8',
+      '.json': 'application/json; charset=utf-8',
+      '.svg': 'image/svg+xml',
+      '.png': 'image/png',
+      '.wav': 'audio/wav'
+    };
+
+    res.writeHead(200, {
+      'Content-Type': types[ext] || 'application/octet-stream',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'SAMEORIGIN',
+      'Referrer-Policy': 'same-origin'
+    });
+
+    fs.createReadStream(file).pipe(res);
+  });
 }
+
+/* =========================
+   OKRESOWE SPRZĄTANIE WYGASŁYCH SESJI
+========================= */
+
+setInterval(() => {
+  pool.query(`DELETE FROM sessions WHERE expires_at < now()`).catch(err => {
+    console.error('Błąd czyszczenia sesji:', err.message);
+  });
+}, 1000 * 60 * 60); // co godzinę
 
 /* =========================
    START
 ========================= */
 
-server.listen(
-  PORT,
-  () => {
-    console.log(
-      `TSNCG Web działa: http://localhost:${PORT}`
-    );
-  }
-);
+pool
+  .query('SELECT 1')
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`TSNCG Web działa: http://localhost:${PORT}`);
+    });
+  })
+  .catch(err => {
+    console.error('Nie udało się połączyć z bazą danych:', err.message);
+    process.exit(1);
+  });
